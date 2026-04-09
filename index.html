@@ -35,6 +35,8 @@ button:active{transform:scale(0.98)}
 .callout-blue{background:#dceefb;border-left:4px solid #185FA5;padding:12px 16px;border-radius:0 10px 10px 0;margin-bottom:12px}
 .callout-red{background:#fce8e8;border-left:4px solid #E24B4A;padding:12px 16px;border-radius:0 10px 10px 0;margin-bottom:12px}
 .step-num{width:26px;height:26px;border-radius:50%;background:#f5f5f0;border:1px solid #e8e8e8;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#999;flex-shrink:0}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a1a;color:#fff;font-size:13px;font-weight:500;padding:10px 20px;border-radius:999px;z-index:999;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
@@ -45,9 +47,15 @@ button:active{transform:scale(0.98)}
       <p style="font-size:10px;font-weight:700;color:#bbb;letter-spacing:0.1em">JOHN DANAHER</p>
       <p style="font-size:17px;font-weight:700;color:#1a1a1a;line-height:1.2">GFF Knowledge Bank</p>
     </div>
-    <input id="gsearch" placeholder="Search..." style="max-width:180px;height:34px" oninput="globalSearch()">
+    <div style="display:flex;align-items:center;gap:8px">
+      <input id="gsearch" placeholder="Search..." style="max-width:150px;height:34px" oninput="globalSearch()">
+      <button onclick="downloadBank()" title="Download backup" style="padding:6px 10px;font-size:18px;border:1px solid #e8e8e8;background:#fff;line-height:1" title="Save backup">⬇</button>
+      <label title="Restore from backup" style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:6px 10px;font-size:18px;border:1px solid #e8e8e8;background:#fff;border-radius:8px;transition:all 0.15s;height:34px;line-height:1" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background='#fff'">⬆<input type="file" accept=".json" style="display:none" onchange="uploadBank(this)"></label>
+    </div>
   </div>
 </div>
+
+<div id="toast" class="toast"></div>
 
 <div class="app" style="padding-top:16px">
 <div id="sr" style="display:none;margin-bottom:1rem"></div>
@@ -325,6 +333,54 @@ function globalSearch(){
 }
 
 function eh(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function showToast(msg,duration){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>t.classList.remove('show'),duration||2500);
+}
+
+function downloadBank(){
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const stamp=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  const payload={
+    version:1,
+    exported:now.toISOString(),
+    exportedReadable:now.toLocaleString(),
+    noteCount:nc(),
+    data:db
+  };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`gff-bank-backup-${stamp}.json`;
+  a.click();URL.revokeObjectURL(a.href);
+  showToast(`✓ Backup saved — ${nc()} notes exported`);
+}
+
+function uploadBank(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const parsed=JSON.parse(e.target.result);
+      const incoming=parsed.data||parsed;
+      const incomingCount=Object.values(incoming).reduce((a,x)=>a+(x?x.length:0),0);
+      const exportedOn=parsed.exportedReadable||parsed.exported||'unknown date';
+      if(!confirm(`Restore backup?\n\nThis backup contains ${incomingCount} notes (saved ${exportedOn}).\n\nYour current ${nc()} notes will be replaced. This cannot be undone.`)){input.value='';return;}
+      db=incoming;save();
+      renderHome();goHome();
+      showToast(`✓ Restored — ${incomingCount} notes loaded`,3000);
+    }catch(err){
+      alert('Could not read backup file. Make sure it\'s a valid GFF bank backup (.json).');
+    }
+    input.value='';
+  };
+  reader.readAsText(file);
+}
+
 loadDB();
 </script>
 </body>
