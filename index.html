@@ -36,6 +36,22 @@
       — type any word, volume number, or chapter name to filter
       across all 64 volumes instantly
 
+  v1.4.1 — Fix add/edit note broken
+    - Fixed JS error caused by duplicate function declarations
+      (openAdd, editNote redeclared after const assignment)
+    - Folded position tag logic directly into core functions
+    - No more function patching pattern
+
+  v1.4.2 — Updated outcome tags
+    - Outcomes updated to: Back control, Mount, Knee on belly,
+      Side control, Guard, Turtle, Sweep, Submission
+
+  v1.4.3 — Split outcomes into two rows
+    - Position row: Guard, Half guard, Mount, Back control,
+      Side control, Knee on belly, Turtle, Standing
+    - Method row: Sweep, Submission, Escape, Takedown
+    - Cleaner layout — starting position on its own line
+
 =============================================================
 -->
 <html lang="en">
@@ -168,26 +184,28 @@ button:active{transform:scale(0.98)}
       <p class="lbl" style="margin-bottom:12px">Overview</p>
       <div style="margin-bottom:10px"><p class="lbl">Note title <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--color-text-secondary);font-size:11px">— pre-filled from chapter, edit if needed</span></p><input id="fn" placeholder="Chapter name"></div>
       <div style="margin-bottom:10px"><p class="lbl">Situation / when to use</p><input id="fs" placeholder="e.g. Opponent super heavy with legs crossed"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div>
-          <p class="lbl" style="margin-bottom:6px">Starting position</p>
-          <select id="f-start" style="font-size:12px;height:34px">
-            <option value="">Select...</option>
-            <option value="mount_bottom">Mount bottom</option>
-            <option value="side_bottom">Side pin bottom</option>
-            <option value="kob_bottom">Knee on belly bottom</option>
-            <option value="rear_bottom">Rear mount bottom</option>
-            <option value="turtle_bottom">Turtle bottom</option>
-            <option value="half_bottom">Half guard bottom</option>
-            <option value="guard_bottom">Guard bottom</option>
-            <option value="standing">Standing</option>
-            <option value="other">Other</option>
-          </select>
-        </div>
-        <div>
-          <p class="lbl" style="margin-bottom:6px">Outcome(s)</p>
-          <div id="outcome-chips" style="display:flex;flex-wrap:wrap;gap:0"></div>
-        </div>
+      <div style="margin-bottom:10px">
+        <p class="lbl" style="margin-bottom:6px">Starting position</p>
+        <select id="f-start" style="font-size:12px;height:34px;max-width:220px">
+          <option value="">Select...</option>
+          <option value="mount_bottom">Mount bottom</option>
+          <option value="side_bottom">Side pin bottom</option>
+          <option value="kob_bottom">Knee on belly bottom</option>
+          <option value="rear_bottom">Rear mount bottom</option>
+          <option value="turtle_bottom">Turtle bottom</option>
+          <option value="half_bottom">Half guard bottom</option>
+          <option value="guard_bottom">Guard bottom</option>
+          <option value="standing">Standing</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div style="margin-bottom:4px">
+        <p class="lbl" style="margin-bottom:6px">Outcome — Position</p>
+        <div id="outcome-pos-chips" style="display:flex;flex-wrap:wrap"></div>
+      </div>
+      <div>
+        <p class="lbl" style="margin-bottom:6px;margin-top:8px">Outcome — Method</p>
+        <div id="outcome-method-chips" style="display:flex;flex-wrap:wrap"></div>
       </div>
     </div>
     <div class="callout-green" style="border-radius:0 12px 12px 0"><p class="lbl" style="color:#3B6D11">Goal — write this first</p><textarea id="fg" rows="2" placeholder="One sentence — what are you trying to achieve?" style="background:transparent;border-color:#97C459;color:#27500A"></textarea></div>
@@ -427,8 +445,9 @@ function openAdd(){
   document.getElementById('fn').value=ch.t;
   document.getElementById('actx').textContent='Vol. '+cV+' \u203a '+VOLS[cV].title+' \u203a '+ch.t;
   steps=[{text:'',img:null},{text:'',img:null},{text:'',img:null}];
-  steps2=[];connections=[];
-  resetPart2UI();renderConnections();rs();show('v-add');
+  steps2=[];connections=[];selectedOutcomes=[];
+  const fs=document.getElementById('f-start');if(fs)fs.value='';
+  resetPart2UI();renderConnections();renderOutcomeChips();rs();show('v-add');
 }
 function cancelAdd(){openCh(cV,cC);}
 
@@ -498,10 +517,12 @@ function editNote(id){
   steps=(n.steps||[]).map(s=>({...s}));
   steps2=(n.steps2||[]).map(s=>({...s}));
   connections=(n.connections||[]).map(c=>({...c}));
+  selectedOutcomes=(n.outcomes||[]).slice();
   const ch=VOLS[cV].chapters[cC];
   document.getElementById('actx').textContent='Vol. '+cV+' \u203a '+VOLS[cV].title+' \u203a '+ch.t;
+  const fs=document.getElementById('f-start');if(fs)fs.value=n.startPos||'';
   resetPart2UI();if(steps2.length)activatePart2();
-  renderConnections();rs();show('v-add');
+  renderConnections();renderOutcomeChips();rs();show('v-add');
 }
 
 function delNote(id){
@@ -512,6 +533,7 @@ function delNote(id){
 function saveNote(){
   const name=document.getElementById('fn').value.trim();
   if(!name){document.getElementById('fn').focus();return;}
+  const fs=document.getElementById('f-start');
   const n={id:eId||Date.now().toString(),name,
     situation:document.getElementById('fs').value.trim(),goal:document.getElementById('fg').value.trim(),
     concept:document.getElementById('fk').value.trim(),details:document.getElementById('fd').value.trim(),
@@ -519,6 +541,8 @@ function saveNote(){
     steps2:steps2.filter(s=>s.text||s.img).map(s=>({text:s.text,img:s.img||null})),
     connections:connections.filter(c=>c.vol),
     warning:document.getElementById('fw').value.trim(),
+    startPos:fs?fs.value:null,
+    outcomes:[...selectedOutcomes],
     updated:Date.now()};
   const k=nk(cV,cC);if(!db[k])db[k]=[];
   if(eId){const i=db[k].findIndex(x=>x.id===eId);if(i>=0)db[k][i]=n;}else db[k].push(n);
@@ -862,19 +886,21 @@ function confirmMove(){
 
 
 // ── Position tags & outcomes ──────────────────────────────────────────────
-const OUTCOME_DEFS={"guard": {"label": "Guard recovery", "bg": "#dff0e3", "tc": "#27500A"}, "half": {"label": "Half guard", "bg": "#dceefb", "tc": "#0c447c"}, "sweep": {"label": "Sweep", "bg": "#FAEEDA", "tc": "#633806"}, "single_leg": {"label": "Single leg", "bg": "#FAEEDA", "tc": "#633806"}, "back": {"label": "Back take", "bg": "#eeedfe", "tc": "#3c3489"}, "sub": {"label": "Submission", "bg": "#fce8e8", "tc": "#791F1F"}, "pin": {"label": "Dominant pin", "bg": "#E1F5EE", "tc": "#085041"}, "standing": {"label": "Standing", "bg": "#f5f5f0", "tc": "#555"}};
+const OUTCOME_POS={"guard":{"label":"Guard","bg":"#dff0e3","tc":"#27500A"},"half":{"label":"Half guard","bg":"#dceefb","tc":"#0c447c"},"mount":{"label":"Mount","bg":"#E6F1FB","tc":"#0c447c"},"back":{"label":"Back control","bg":"#eeedfe","tc":"#3c3489"},"side":{"label":"Side control","bg":"#FAEEDA","tc":"#633806"},"kob":{"label":"Knee on belly","bg":"#EAF3DE","tc":"#27500A"},"turtle":{"label":"Turtle","bg":"#F1EFE8","tc":"#444441"},"standing":{"label":"Standing","bg":"#f5f5f0","tc":"#555"}};
+const OUTCOME_METHOD={"sweep":{"label":"Sweep","bg":"#fce8e8","tc":"#791F1F"},"sub":{"label":"Submission","bg":"#FCEBEB","tc":"#A32D2D"},"escape":{"label":"Escape","bg":"#dff0e3","tc":"#27500A"},"takedown":{"label":"Takedown","bg":"#FAEEDA","tc":"#633806"}};
 const POS_LABELS={"mount_bottom": "Mount bottom", "side_bottom": "Side pin bottom", "kob_bottom": "KOB bottom", "rear_bottom": "Rear mount bottom", "turtle_bottom": "Turtle bottom", "half_bottom": "Half guard bottom", "guard_bottom": "Guard bottom", "standing": "Standing", "other": "Other"};
 const POS_COLORS={"mount_bottom": ["#E6F1FB", "#0c447c"], "side_bottom": ["#FAEEDA", "#633806"], "kob_bottom": ["#EAF3DE", "#27500A"], "rear_bottom": ["#eeedfe", "#3c3489"], "turtle_bottom": ["#f5f5f0", "#444"], "half_bottom": ["#fce8e8", "#791F1F"], "guard_bottom": ["#E1F5EE", "#085041"], "standing": ["#f5f5f0", "#444"], "other": ["#f5f5f0", "#666"]};
-const OUT_COLORS={"guard": ["#dff0e3", "#27500A"], "half": ["#dceefb", "#0c447c"], "sweep": ["#FAEEDA", "#633806"], "single_leg": ["#FAEEDA", "#633806"], "back": ["#eeedfe", "#3c3489"], "sub": ["#fce8e8", "#791F1F"], "pin": ["#E1F5EE", "#085041"], "standing": ["#f5f5f0", "#555"]};
-const OUT_LABELS={"guard": "Guard recovery", "half": "Half guard", "sweep": "Sweep", "single_leg": "Single leg", "back": "Back take", "sub": "Submission", "pin": "Dominant pin", "standing": "Standing"};
+const OUT_COLORS={"guard":["#dff0e3","#27500A"],"half":["#dceefb","#0c447c"],"mount":["#E6F1FB","#0c447c"],"back":["#eeedfe","#3c3489"],"side":["#FAEEDA","#633806"],"kob":["#EAF3DE","#27500A"],"turtle":["#F1EFE8","#444441"],"standing":["#f5f5f0","#555"],"sweep":["#fce8e8","#791F1F"],"sub":["#FCEBEB","#A32D2D"],"escape":["#dff0e3","#27500A"],"takedown":["#FAEEDA","#633806"]};
+const OUT_LABELS={"guard":"Guard","half":"Half guard","mount":"Mount","back":"Back control","side":"Side control","kob":"Knee on belly","turtle":"Turtle","standing":"Standing","sweep":"Sweep","sub":"Submission","escape":"Escape","takedown":"Takedown"};
 
 let selectedOutcomes=[];
 
 function renderOutcomeChips(){
-  const el=document.getElementById('outcome-chips');if(!el)return;
-  el.innerHTML=Object.entries(OUTCOME_DEFS).map(([k,d])=>
-    `<span class="outcome-chip ${selectedOutcomes.includes(k)?'sel':''}" onclick="toggleOutcome('${k}')" style="background:${selectedOutcomes.includes(k)?d.bg:'#f5f5f0'};border-color:${selectedOutcomes.includes(k)?d.tc:'#ddd'};color:${selectedOutcomes.includes(k)?d.tc:'#666'}">${d.label}</span>`
-  ).join('');
+  const posEl=document.getElementById('outcome-pos-chips');
+  const methodEl=document.getElementById('outcome-method-chips');
+  const chip=(k,d)=>`<span class="outcome-chip ${selectedOutcomes.includes(k)?'sel':''}" onclick="toggleOutcome('${k}')" style="background:${selectedOutcomes.includes(k)?d.bg:'var(--color-background-secondary)'};border-color:${selectedOutcomes.includes(k)?d.tc:'var(--color-border-tertiary)'};color:${selectedOutcomes.includes(k)?d.tc:'var(--color-text-secondary)'}">${d.label}</span>`;
+  if(posEl) posEl.innerHTML=Object.entries(OUTCOME_POS).map(([k,d])=>chip(k,d)).join('');
+  if(methodEl) methodEl.innerHTML=Object.entries(OUTCOME_METHOD).map(([k,d])=>chip(k,d)).join('');
 }
 
 function toggleOutcome(k){
@@ -1146,46 +1172,6 @@ function mmOpenNote(id,vol,ch){
   const k=nk(vol,ch);
   const n=(db[k]||[]).find(x=>x.id===id);
   if(n){show('v-det');openNote(id);}
-}
-
-// ── Patch openAdd/editNote to init position tags ───────────────────────────
-const _origOpenAdd=openAdd;
-function openAdd(){
-  selectedOutcomes=[];
-  _origOpenAdd();
-  setTimeout(()=>{
-    renderOutcomeChips();
-    document.getElementById('f-start').value='';
-  },0);
-}
-
-const _origEditNote=editNote;
-function editNote(id){
-  const k=nk(cV,cC),n=(db[k]||[]).find(x=>x.id===id);
-  selectedOutcomes=(n&&n.outcomes)?[...n.outcomes]:[];
-  _origEditNote(id);
-  setTimeout(()=>{
-    renderOutcomeChips();
-    if(n&&n.startPos)document.getElementById('f-start').value=n.startPos;
-  },0);
-}
-
-// ── Patch saveNote to include position tags ────────────────────────────────
-const _origSaveNote=saveNote;
-function saveNote(){
-  // We intercept by modifying the note after save
-  const eIdPre=eId;
-  _origSaveNote();
-  // find the note we just saved and add position data
-  const k=nk(cV,cC);
-  const notes=db[k]||[];
-  // it was just pushed/updated — find by eIdPre or last
-  let target=eIdPre?notes.find(x=>x.id===eIdPre):notes[notes.length-1];
-  if(target){
-    target.startPos=document.getElementById('f-start')?.value||null;
-    target.outcomes=[...selectedOutcomes];
-    save();
-  }
 }
 
 loadDB();
